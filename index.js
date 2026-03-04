@@ -673,7 +673,12 @@ async function play(guild, textChannel) {
       const scStream = await playdl.stream(song.url, { quality:2 });
       resource = createAudioResource(scStream.stream, { inputType:scStream.type, inlineVolume:true });
     } else {
-      // YouTube via play-dl (pure Node.js, no python/yt-dlp needed)
+      // YouTube via play-dl
+      if (!song.url || song.url === 'undefined') {
+        console.error('play(): song.url is invalid:', song.url, song.title);
+        q.songs.shift();
+        return play(guild, textChannel);
+      }
       const ytStream = await playdl.stream(song.url, { quality: 2 });
       resource = createAudioResource(ytStream.stream, { inputType: ytStream.type, inlineVolume: true });
     }
@@ -779,9 +784,21 @@ async function searchSong(input) {
     return { url, title, duration: duration||'N/A', source:'youtube', artist: r[0].channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'' };
   }
   else if (input.includes('youtube.com') || input.includes('youtu.be')) {
-    const r = await playdl.search(input, { source:{ youtube:'video' }, limit:1 });
-    url = input; title = r[0]?.title||input; duration = r[0]?.durationRaw;
-    return { url, title, duration: duration||'N/A', source:'youtube', artist: r[0]?.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'' };
+    // Langsung pakai URL, cari info judul/durasi
+    try {
+      const info = await playdl.video_info(input);
+      url = input;
+      title = info.video_details?.title || input;
+      duration = info.video_details?.durationRaw || 'N/A';
+      const artist = info.video_details?.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'';
+      return { url, title, duration, source:'youtube', artist };
+    } catch {
+      // Fallback ke search
+      const r = await playdl.search(input, { source:{ youtube:'video' }, limit:1 });
+      if (!r.length) return null;
+      url = r[0].url; title = r[0].title; duration = r[0].durationRaw;
+      return { url, title, duration: duration||'N/A', source:'youtube', artist: r[0]?.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'' };
+    }
   }
   else {
     const r = await playdl.search(input, { source:{ youtube:'video' }, limit:1 }); if (!r.length) return null;
