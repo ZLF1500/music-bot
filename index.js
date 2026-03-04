@@ -58,7 +58,8 @@ const geniusClient = new Genius.Client();
 const GENRE_OPTIONS = [
   { label: '🎵 Off (semua genre)',  value: 'off',        description: 'Autoplay tidak difilter genre' },
   { label: '🎤 Vocaloid',           value: 'vocaloid',   description: 'Hatsune Miku, UTAU, Vocaloid' },
-  { label: '⚡ Nightcore',          value: 'nightcore',  description: 'Nightcore, sped up, pitched up' },
+  { label: '⚡ Nightcore',          value: 'nightcore',  description: 'Nightcore only' },
+  { label: '🎛️ Audio Edit',         value: 'audioedit',  description: 'Speed up, slowed, reverb, pitch, remix' },
   { label: '🎸 Funk',               value: 'funk',       description: 'Funk, groove, slap bass, disco' },
   { label: '🌀 Phonk',              value: 'phonk',      description: 'Phonk, drift phonk, memphis' },
   { label: '🎧 EDM',                value: 'edm',        description: 'Electronic, techno, house, dubstep' },
@@ -75,6 +76,7 @@ const GENRE_OPTIONS = [
   { label: '🎤 R&B / Soul',         value: 'rnb',        description: 'R&B, soul, neo soul' },
   { label: '🎤 Rap / Hip-Hop',      value: 'rap',        description: 'Rap, hip-hop, trap' },
   { label: '🪗 Acoustic / Folk',    value: 'acoustic',   description: 'Acoustic, unplugged, fingerstyle' },
+  { label: '🇧🇷 Montagem / Baile Funk', value: 'montagem', description: 'Montagem, Baile Funk, Funk Carioca' },
 ];
 
 const GENRE_KEYWORD_MAP = {
@@ -95,7 +97,8 @@ const GENRE_KEYWORD_MAP = {
     // Japanese terms
     '初音ミク','鏡音リン','鏡音レン','巡音ルカ','歌い手','utaite','niconico','ボカロ','ボーカロイド',
   ],
-  nightcore:  ['nightcore','sped up version','speed up','spedup','pitched up','nightcore -'],
+  nightcore:  ['nightcore'],
+  audioedit:  ['sped up','speed up','spedup','pitched up','slowed reverb','slowed + reverb','slowed down','reverb version','pitch up','pitched','remix','edit audio','audio edit','lofi edit','phonk edit','anime edit','amv','nightcore -'],
   funk:       ['funk music','funky','slap bass','disco funk','funk guitar','funk band','g-funk'],
   phonk:      ['phonk','drift phonk','memphis rap','hard phonk','cowbell phonk','phonk music'],
   edm:        ['edm','electronic dance','techno music','trance music','dubstep','drum and bass','dnb music','house music','future bass','hyperpop'],
@@ -112,6 +115,7 @@ const GENRE_KEYWORD_MAP = {
   rnb:        ['r&b music','rnb music','soul music','neo soul','contemporary r&b','smooth rnb'],
   rap:        ['rap music','hip hop music','trap music','freestyle rap','cypher rap','rap song','hip-hop'],
   acoustic:   ['acoustic cover','acoustic version','unplugged','fingerstyle guitar','acoustic guitar','folk music','acoustic session'],
+  montagem:   ['montagem','baile funk','funk carioca','funk brasil','funk brasileiro','funk melody','tamborzão','proibidão','mc ','phonk montagem','brazilian phonk','brega funk','piseiro'],
 };
 
 const commands = [
@@ -204,7 +208,8 @@ const GENRE_GROUPS = [
    'hatsune miku','kagamine','megurine luka','gumi vocaloid','ia vocaloid','v flower',
    'kasane teto','kafu cevio','eleanor forte','saki ai','solaria','namine ritsu',
    'utaite','niconico','初音ミク','鏡音','巡音','ボカロ','ボーカロイド','歌い手'],
-  ['nightcore','sped up','speed up','spedup','pitched up','slowed reverb','slowed + reverb','reverb lyrics','sped reverb'],
+  ['nightcore'],
+  ['sped up','speed up','spedup','pitched up','slowed reverb','slowed + reverb','slowed down','reverb version','pitch up','audio edit','lofi edit','phonk edit','anime edit','amv'],
   ['funk','funky','groove','bass guitar','slap bass','disco funk','soul funk'],
   ['lofi','lo-fi','lo fi','chill hop','chillhop','study music','beats to'],
   ['phonk','drift phonk','memphis','hard phonk','cowbell phonk'],
@@ -212,17 +217,16 @@ const GENRE_GROUPS = [
   ['jazz','bossa nova','swing jazz','bebop','blues jazz'],
   ['classical','orchestral','symphony','piano solo','violin solo','cello solo','chamber music'],
   ['kpop','k-pop','idol group','blackpink','bts ','twice ','stray kids','aespa','newjeans','ive ','itzy','nmixx','lesserafim'],
-  // Anime/JPop diperluas: cover, vietsub, sub indo, romaji, lirik, karakter CJK, dll
   ['anime','ost','opening','ending','insert song','jpop','j-pop','japanese','japan','romaji',
-   'vietsub','viet sub','sub indo','indo sub','lirik','lyrics jp',
-   'cover jp','anime cover','anime song','anime music',
-   '\u3000','\u3041','\u3042','\u304b','\u3053','\u3055','\u305f','\u306a','\u306f','\u307e','\u3084','\u3089','\u308f', // hiragana
-   '\u30a1','\u30a2','\u30ab','\u30b3','\u30b5','\u30bf','\u30ca','\u30cf','\u30de','\u30e4','\u30e9','\u30ef', // katakana
+   'anime cover','anime song','anime music',
+   '\u3000','\u3041','\u3042','\u304b','\u3053','\u3055','\u305f','\u306a','\u306f','\u307e','\u3084','\u3089','\u308f',
+   '\u30a1','\u30a2','\u30ab','\u30b3','\u30b5','\u30bf','\u30ca','\u30cf','\u30de','\u30e4','\u30e9','\u30ef',
   ],
   ['edm','electronic','techno','trance','dubstep','drum and bass','dnb','house music','future bass','hyperpop'],
   ['acoustic','unplugged','folk','singer songwriter','indie folk','fingerstyle'],
   ['rap','hip hop','hip-hop','trap beat','freestyle rap','cypher','diss track'],
   ['rnb','r&b','soul music','neo soul','smooth rnb'],
+  ['montagem','baile funk','funk carioca','funk brasil','tamborzão','mc ','phonk montagem','brazilian phonk','brega funk'],
 ];
 
 // Deteksi tambahan: kalau judul mengandung karakter CJK (Chinese/Japanese/Korean), treat as anime/jpop
@@ -262,7 +266,11 @@ async function searchGenreDirect(query, histSet=new Set()) {
           const lines = out.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
           const candidates = lines
             .map(l=>{try{return JSON.parse(l);}catch{return null;}})
-            .filter(v=>v && !histSet.has(v.id));
+            .filter(v=>{
+              if (!v || histSet.has(v.id)) return false;
+              const dur = v.duration || 0;
+              return dur > 0 && dur <= 600;
+            });
           if (!candidates.length) return resolve(null);
           const pick = candidates[Math.floor(Math.random()*Math.min(candidates.length,5))];
           const uploader = (pick.uploader||pick.channel||'').replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim();
@@ -296,7 +304,12 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
           const histSet = new Set(history);
           let candidates = lines.slice(1)
             .map(l=>{ try { return JSON.parse(l); } catch { return null; } })
-            .filter(v => v && !histSet.has(v.id));
+            .filter(v => {
+              if (!v || histSet.has(v.id)) return false;
+              // Block lagu > 10 menit di autoplay
+              const dur = v.duration || 0;
+              return dur > 0 && dur <= 600;
+            });
 
           if (!candidates.length) return resolve(null);
 
@@ -746,6 +759,7 @@ async function play(guild, textChannel) {
       if (lastTitle) { q.genreHistory = q.genreHistory||[]; q.genreHistory.push(lastTitle); if(q.genreHistory.length>50) q.genreHistory.shift(); }
       const genreHints = detectGenreKeywords((q.genreHistory||[]).join(' '));
       try { await msg.edit({components:disabledButtons()}); } catch {}
+      if (q.loop !== 'song') setTimeout(() => msg.delete().catch(()=>{}), 3000);
 
       if (q.loop==='song') return play(guild,textChannel);
       q.prevSong = q.songs[0] || null; // simpan sebelum shift
