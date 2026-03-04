@@ -1,5 +1,6 @@
 const path = require('path');
 const { spawn } = require('child_process');
+const youtubedl = require('youtube-dl-exec');
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const playdl = require('play-dl');
@@ -255,15 +256,14 @@ function detectGenreKeywords(text) {
 async function searchGenreDirect(query, histSet=new Set()) {
   return new Promise(resolve => {
     try {
-      const proc = spawn('yt-dlp',['--dump-json','--flat-playlist','--no-warnings','--quiet',
-        '--cookies',path.join(__dirname,'cookies.txt'),
-        '--playlist-end','15',`ytsearch15:${query}`]);
-      let out = '';
-      proc.stdout.on('data',d=>out+=d.toString());
-      proc.stderr.on('data',()=>{});
-      proc.on('close',()=>{
+      youtubedl(`ytsearch15:${query}`, {
+        dumpJson: true, flatPlaylist: true, noWarnings: true, quiet: true,
+        cookies: path.join(__dirname,'cookies.txt'),
+        playlistEnd: 15, printJson: true,
+      }).then(output => {
+        const raw = typeof output === 'string' ? output : JSON.stringify(output);
         try {
-          const lines = out.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
+          const lines = raw.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
           const candidates = lines
             .map(l=>{try{return JSON.parse(l);}catch{return null;}})
             .filter(v=>{
@@ -283,8 +283,7 @@ async function searchGenreDirect(query, histSet=new Set()) {
             artist:   uploader,
           });
         } catch { resolve(null); }
-      });
-      proc.on('error',()=>resolve(null));
+      }).catch(()=>resolve(null));
     } catch { resolve(null); }
   });
 }
@@ -293,14 +292,14 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
   return new Promise(resolve=>{
     try {
       const videoId = lastUrl.split('v=')[1]?.split('&')[0]; if (!videoId) return resolve(null);
-      const proc = spawn('yt-dlp',['--dump-json','--flat-playlist','--no-warnings','--quiet',
-        '--cookies',path.join(__dirname,'cookies.txt'),'--remote-components','ejs:github',
-        '--playlist-end','30',`https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`]);
-      let out='';
-      proc.stdout.on('data',d=>out+=d.toString()); proc.stderr.on('data',()=>{});
-      proc.on('close',()=>{
+      youtubedl(`https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`, {
+        dumpJson: true, flatPlaylist: true, noWarnings: true, quiet: true,
+        cookies: path.join(__dirname,'cookies.txt'),
+        playlistEnd: 30, printJson: true,
+      }).then(output => {
+        const raw = typeof output === 'string' ? output : JSON.stringify(output);
         try {
-          const lines = out.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
+          const lines = raw.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
           const histSet = new Set(history);
           let candidates = lines.slice(1)
             .map(l=>{ try { return JSON.parse(l); } catch { return null; } })
@@ -368,8 +367,7 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
             artist:   uploader,
           });
         } catch { resolve(null); }
-      });
-      proc.on('error',()=>resolve(null));
+      }).catch(()=>resolve(null));
     } catch { resolve(null); }
   });
 }
@@ -729,10 +727,15 @@ async function play(guild, textChannel) {
       const scStream = await playdl.stream(song.url, { quality:2 });
       resource = createAudioResource(scStream.stream, { inputType:scStream.type, inlineVolume:true });
     } else {
-      const proc = spawn('yt-dlp',['-f','bestaudio/best','-o','-','--quiet',
-        '--cookies',path.join(__dirname,'cookies.txt'),'--remote-components','ejs:github',song.url]);
-      proc.stderr.on('data',d=>{ const m=d.toString(); if(!m.includes('Broken pipe')&&!m.includes('Invalid argument')) console.error('yt-dlp:',m.trim()); });
-      q.currentProcess=proc;
+      // YouTube via youtube-dl-exec (cross-platform, no python needed)
+      const proc = youtubedl.exec(song.url, {
+        format: 'bestaudio/best',
+        output: '-',
+        quiet: true,
+        cookies: path.join(__dirname, 'cookies.txt'),
+      });
+      proc.stderr?.on('data', d=>{ const m=d.toString(); if(!m.includes('Broken pipe')&&!m.includes('Invalid argument')) console.error('yt-dlp:',m.trim()); });
+      q.currentProcess = proc;
       resource = createAudioResource(proc.stdout, { inputType:'arbitrary', inlineVolume:true });
     }
     resource.volume?.setVolume(((q.volume||100)/100)*2);
