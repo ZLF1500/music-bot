@@ -1258,8 +1258,27 @@ async function main() {
   process.on('unhandledRejection', err => console.error('Unhandled rejection (ignored):', err?.message || err));
   process.on('uncaughtException',  err => console.error('Uncaught exception (ignored):',  err?.message || err));
 
-  const cookies=JSON.parse(fs.readFileSync('./cookies.json','utf8'));
-  await playdl.setToken({youtube:{cookie:cookies.map(c=>`${c.name}=${c.value}`).join('; ')}});
+  console.log('🔄  Starting bot...');
+  console.log('   NODE_ENV:', process.env.NODE_ENV || 'not set');
+  console.log('   TOKEN:', process.env.TOKEN ? '✅ set' : '❌ MISSING');
+  console.log('   __dirname:', __dirname);
+
+  // Setup play-dl YouTube cookies (optional)
+  try {
+    const cookiesPath = path.join(__dirname, 'cookies.json');
+    if (fs.existsSync(cookiesPath)) {
+      const cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf8'));
+      await playdl.setToken({ youtube: { cookie: cookies.map(c=>`${c.name}=${c.value}`).join('; ') } });
+      console.log('✅  YouTube cookies loaded');
+    } else if (process.env.YT_COOKIE) {
+      await playdl.setToken({ youtube: { cookie: process.env.YT_COOKIE } });
+      console.log('✅  YouTube cookies loaded from env');
+    } else {
+      console.warn('⚠️  No YouTube cookies - some videos may be restricted');
+    }
+  } catch(e) { console.warn('⚠️  Cookie setup failed:', e.message); }
+
+  console.log('🔄  Logging in to Discord...');
   await client.login(process.env.TOKEN);
 }
 main();
