@@ -255,7 +255,7 @@ function detectGenreKeywords(text) {
 async function searchGenreDirect(query, histSet=new Set()) {
   return new Promise(resolve => {
     try {
-      const proc = spawn(process.platform==='win32'?'python':'python3',['-m','yt_dlp','--dump-json','--flat-playlist','--no-warnings','--quiet',
+      const proc = spawn('yt-dlp',['--dump-json','--flat-playlist','--no-warnings','--quiet',
         '--cookies',path.join(__dirname,'cookies.txt'),
         '--playlist-end','15',`ytsearch15:${query}`]);
       let out = '';
@@ -293,7 +293,7 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
   return new Promise(resolve=>{
     try {
       const videoId = lastUrl.split('v=')[1]?.split('&')[0]; if (!videoId) return resolve(null);
-      const proc = spawn(process.platform==='win32'?'python':'python3',['-m','yt_dlp','--dump-json','--flat-playlist','--no-warnings','--quiet',
+      const proc = spawn('yt-dlp',['--dump-json','--flat-playlist','--no-warnings','--quiet',
         '--cookies',path.join(__dirname,'cookies.txt'),'--remote-components','ejs:github',
         '--playlist-end','30',`https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`]);
       let out='';
@@ -729,7 +729,7 @@ async function play(guild, textChannel) {
       const scStream = await playdl.stream(song.url, { quality:2 });
       resource = createAudioResource(scStream.stream, { inputType:scStream.type, inlineVolume:true });
     } else {
-      const proc = spawn(process.platform==='win32'?'python':'python3',['-m','yt_dlp','-f','bestaudio/best','-o','-','--quiet',
+      const proc = spawn('yt-dlp',['-f','bestaudio/best','-o','-','--quiet',
         '--cookies',path.join(__dirname,'cookies.txt'),'--remote-components','ejs:github',song.url]);
       proc.stderr.on('data',d=>{ const m=d.toString(); if(!m.includes('Broken pipe')&&!m.includes('Invalid argument')) console.error('yt-dlp:',m.trim()); });
       q.currentProcess=proc;
