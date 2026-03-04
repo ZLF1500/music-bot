@@ -1,6 +1,6 @@
 const path = require('path');
 const { spawn } = require('child_process');
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const playdl = require('play-dl');
 const Genius = require('genius-lyrics');
@@ -13,7 +13,6 @@ const SPOTIFY_CLIENT_ID     = '9e6caf932a7f4418a28520e7950b4887';
 const SPOTIFY_CLIENT_SECRET = 'b3ff13689eb0452cbf000748874aaa88';
 const SAVED_QUEUE_FILE  = path.join(__dirname, 'saved_queue.json');
 const PLAYLISTS_FILE    = path.join(__dirname, 'playlists.json');
-const MAX_PLAYLIST      = 100;
 const mode247  = new Set();
 const djMode   = new Set();
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
@@ -26,6 +25,7 @@ const DEFAULT_SETTINGS = {
   defaultVol:   100,
   maxPlaylist:  100,
   loop:         'off',
+  genreOnly:    null,
 };
 const guildSettings = new Map();
 
@@ -54,6 +54,65 @@ const footer   = () => ({ text:'Tofuu Music', iconURL:BOT_ICON() });
 const client = new Client({ intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildVoiceStates,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent] });
 const queues       = new Map();
 const geniusClient = new Genius.Client();
+
+const GENRE_OPTIONS = [
+  { label: '🎵 Off (semua genre)',  value: 'off',        description: 'Autoplay tidak difilter genre' },
+  { label: '🎤 Vocaloid',           value: 'vocaloid',   description: 'Hatsune Miku, UTAU, Vocaloid' },
+  { label: '⚡ Nightcore',          value: 'nightcore',  description: 'Nightcore, sped up, pitched up' },
+  { label: '🎸 Funk',               value: 'funk',       description: 'Funk, groove, slap bass, disco' },
+  { label: '🌀 Phonk',              value: 'phonk',      description: 'Phonk, drift phonk, memphis' },
+  { label: '🎧 EDM',                value: 'edm',        description: 'Electronic, techno, house, dubstep' },
+  { label: '🌸 J-Pop / Anime',      value: 'jpop',       description: 'J-Pop, anime OST, opening/ending' },
+  { label: '💎 K-Pop',              value: 'kpop',       description: 'K-Pop, idol, BTS, BLACKPINK' },
+  { label: '🎹 Lo-Fi',              value: 'lofi',       description: 'Lo-fi, chill hop, study beats' },
+  { label: '🤘 Metal',              value: 'metal',      description: 'Metal, metalcore, djent' },
+  { label: '🎷 Jazz',               value: 'jazz',       description: 'Jazz, blues, bossa nova' },
+  { label: '🎻 Classical',          value: 'classical',  description: 'Orkestra, piano solo, symphony' },
+  { label: '🎤 Pop',                value: 'pop',        description: 'Pop Indonesia & internasional' },
+  { label: '🌿 Indie',              value: 'indie',      description: 'Indie pop, indie folk, alternative' },
+  { label: '🇮🇩 Indonesian Music',  value: 'indonesian', description: 'Musik Indonesia, dangdut, keroncong' },
+  { label: '🕌 Islamic Music',      value: 'islamic',    description: 'Nasyid, sholawat, nasheed' },
+  { label: '🎤 R&B / Soul',         value: 'rnb',        description: 'R&B, soul, neo soul' },
+  { label: '🎤 Rap / Hip-Hop',      value: 'rap',        description: 'Rap, hip-hop, trap' },
+  { label: '🪗 Acoustic / Folk',    value: 'acoustic',   description: 'Acoustic, unplugged, fingerstyle' },
+];
+
+const GENRE_KEYWORD_MAP = {
+  vocaloid:   [
+    // Engine
+    'vocaloid','synthv','synth v','cevio','cevio ai','utau','vocalo','voiceroid','neutrino','diffsinger','nnsvs',
+    // Vocaloid characters
+    'hatsune miku','kagamine rin','kagamine len','megurine luka','kaito vocaloid','meiko vocaloid',
+    'gumi vocaloid','ia vocaloid','v flower','zunko','mayu vocaloid','yukari yuzuki','galaco',
+    // SynthV characters
+    'kasane teto synthv','eleanor forte','saki ai','kevin synthv','solaria synthv','anri rune','asterian',
+    'natalie synthv','var synthv','eri synthv','chiyu synthv','yae miko synthv',
+    // CeVIO / CeVIO AI characters
+    'kafu cevio','cevio kafu','ia cevio','one cevio','koharu rikka','sato sasara','takahashi','tsurumaki maki',
+    'natsuki karin','tsuina chan','suzuki tsudumi',
+    // UTAU characters
+    'namine ritsu','teto kasane','kasane teto','sukone tei','defoko','ruko yokune','momo momone',
+    // Japanese terms
+    '初音ミク','鏡音リン','鏡音レン','巡音ルカ','歌い手','utaite','niconico','ボカロ','ボーカロイド',
+  ],
+  nightcore:  ['nightcore','sped up version','speed up','spedup','pitched up','nightcore -'],
+  funk:       ['funk music','funky','slap bass','disco funk','funk guitar','funk band','g-funk'],
+  phonk:      ['phonk','drift phonk','memphis rap','hard phonk','cowbell phonk','phonk music'],
+  edm:        ['edm','electronic dance','techno music','trance music','dubstep','drum and bass','dnb music','house music','future bass','hyperpop'],
+  jpop:       ['anime','jpop','j-pop','japanese pop','anime ost','anime opening','anime ending','anime cover','anime song','アニメ','日本語'],
+  kpop:       ['kpop','k-pop','korean pop','blackpink','bts official','twice official','stray kids','aespa official','newjeans official','ive official','itzy official'],
+  lofi:       ['lofi hip hop','lo-fi hip hop','lofi beats','chillhop','chill hop music','study beats','lofi music'],
+  metal:      ['metal music','metalcore','deathcore','djent','heavy metal','thrash metal','screamo','death metal','black metal'],
+  jazz:       ['jazz music','bossa nova','jazz guitar','bebop','smooth jazz','jazz piano','big band'],
+  classical:  ['classical music','orchestral','symphony orchestra','piano concerto','violin concerto','chamber music','opera music','philharmonic'],
+  pop:        ['pop music official','pop song official','official music video','official audio','pop indonesia official'],
+  indie:      ['indie pop','indie folk','indie rock','bedroom pop','indie music','alternative indie','lo-fi indie'],
+  indonesian: ['lagu indonesia','musik indonesia','pop indonesia','dangdut','keroncong','lagu indo','band indonesia','penyanyi indonesia','lagu melayu'],
+  islamic:    ['nasyid','sholawat','salawat','musik islami','islamic music','nasheed','hadroh','murottal','qasidah marawis'],
+  rnb:        ['r&b music','rnb music','soul music','neo soul','contemporary r&b','smooth rnb'],
+  rap:        ['rap music','hip hop music','trap music','freestyle rap','cypher rap','rap song','hip-hop'],
+  acoustic:   ['acoustic cover','acoustic version','unplugged','fingerstyle guitar','acoustic guitar','folk music','acoustic session'],
+};
 
 const commands = [
   new SlashCommandBuilder().setName('play').setDescription('Putar lagu').addStringOption(o=>o.setName('lagu').setDescription('Nama lagu atau link').setRequired(true).setAutocomplete(true)),
@@ -86,6 +145,9 @@ const commands = [
   new SlashCommandBuilder().setName('delpl').setDescription('Hapus playlist').addStringOption(o=>o.setName('nama').setDescription('Nama playlist').setRequired(true)),
   new SlashCommandBuilder().setName('clear').setDescription('Hapus semua lagu di queue kecuali yang sedang diputar'),
   new SlashCommandBuilder().setName('settings').setDescription('Lihat & atur semua pengaturan bot'),
+  new SlashCommandBuilder().setName('setgenre').setDescription('Set filter genre autoplay')
+    .addStringOption(o => o.setName('genre').setDescription('Pilih genre').setRequired(true)
+      .addChoices(...GENRE_OPTIONS.map(g => ({ name: g.label, value: g.value })))),
 ].map(c=>c.toJSON());
 
 // ─── PLAYLIST HELPERS ────────────────────────────────────────────────────────
@@ -138,7 +200,10 @@ async function getSpotifyPlaylist(url, maxLimit=100) {
 
 // Genre keyword groups — kalau judul/channel cocok, prioritaskan lagu dari grup yang sama
 const GENRE_GROUPS = [
-  ['vocaloid','miku','rin len','kagamine','luka','gumi','ia ','kaito','meiko','utau','vocalo','初音','鏡音','巡音','歌い手','utaite','niconico','nico nico'],
+  ['vocaloid','synthv','synth v','cevio','utau','vocalo','voiceroid','neutrino','diffsinger',
+   'hatsune miku','kagamine','megurine luka','gumi vocaloid','ia vocaloid','v flower',
+   'kasane teto','kafu cevio','eleanor forte','saki ai','solaria','namine ritsu',
+   'utaite','niconico','初音ミク','鏡音','巡音','ボカロ','ボーカロイド','歌い手'],
   ['nightcore','sped up','speed up','spedup','pitched up','slowed reverb','slowed + reverb','reverb lyrics','sped reverb'],
   ['funk','funky','groove','bass guitar','slap bass','disco funk','soul funk'],
   ['lofi','lo-fi','lo fi','chill hop','chillhop','study music','beats to'],
@@ -181,7 +246,42 @@ function detectGenreKeywords(text) {
   return [...new Set(matched)]; // dedupe
 }
 
-async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=[]) {
+// ─── GENRE FILTER ─────────────────────────────────────────────────────────────
+
+async function searchGenreDirect(query, histSet=new Set()) {
+  return new Promise(resolve => {
+    try {
+      const proc = spawn('python',['-m','yt_dlp','--dump-json','--flat-playlist','--no-warnings','--quiet',
+        '--cookies',path.join(__dirname,'cookies.txt'),
+        '--playlist-end','15',`ytsearch15:${query}`]);
+      let out = '';
+      proc.stdout.on('data',d=>out+=d.toString());
+      proc.stderr.on('data',()=>{});
+      proc.on('close',()=>{
+        try {
+          const lines = out.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
+          const candidates = lines
+            .map(l=>{try{return JSON.parse(l);}catch{return null;}})
+            .filter(v=>v && !histSet.has(v.id));
+          if (!candidates.length) return resolve(null);
+          const pick = candidates[Math.floor(Math.random()*Math.min(candidates.length,5))];
+          const uploader = (pick.uploader||pick.channel||'').replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim();
+          resolve({
+            title:    pick.title||'Unknown',
+            url:      `https://www.youtube.com/watch?v=${pick.id}`,
+            duration: pick.duration_string||'N/A',
+            requester:'Autoplay',
+            source:   'youtube',
+            artist:   uploader,
+          });
+        } catch { resolve(null); }
+      });
+      proc.on('error',()=>resolve(null));
+    } catch { resolve(null); }
+  });
+}
+
+async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=[], guildId=null) {
   return new Promise(resolve=>{
     try {
       const videoId = lastUrl.split('v=')[1]?.split('&')[0]; if (!videoId) return resolve(null);
@@ -194,11 +294,27 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
         try {
           const lines = out.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
           const histSet = new Set(history);
-          const candidates = lines.slice(1)
+          let candidates = lines.slice(1)
             .map(l=>{ try { return JSON.parse(l); } catch { return null; } })
             .filter(v => v && !histSet.has(v.id));
 
           if (!candidates.length) return resolve(null);
+
+          // Hard filter: kalau genreOnly aktif, hanya lagu yang cocok keyword genre itu
+          const genreOnly = guildId ? getSettings(guildId).genreOnly : null;
+          if (genreOnly && genreOnly !== 'off' && GENRE_KEYWORD_MAP[genreOnly]) {
+            const hardKeywords = GENRE_KEYWORD_MAP[genreOnly];
+            const filtered = candidates.filter(v => {
+              const combined = ((v.title||'') + ' ' + (v.uploader||v.channel||'')).toLowerCase();
+              return hardKeywords.some(k => combined.includes(k));
+            });
+            if (filtered.length) {
+              candidates = filtered;
+            } else {
+              const searchQuery = hardKeywords.slice(0,3).join(' ') + ' music';
+              return searchGenreDirect(searchQuery, histSet).then(resolve);
+            }
+          }
 
           // Score tiap kandidat dengan recency weight:
           // keyword dari lagu yang lebih baru di genreHistory dapat bobot lebih tinggi
@@ -210,7 +326,6 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
             const total = genreHints.length || 1;
             genreHints.forEach((k, i) => {
               if (combined.includes(k)) {
-                // keyword di posisi belakang (lebih baru) dapat bobot lebih tinggi
                 score += 1 + (i / total);
               }
             });
@@ -223,10 +338,8 @@ async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=
 
           let pool;
           if (topScore > 0) {
-            // Ambil semua yang score-nya sama dengan tertinggi, lalu random dari situ
             pool = scored.filter(x => x.score === topScore).map(x => x.v);
           } else {
-            // Tidak ada genre match — ambil semua, random
             pool = scored.map(x => x.v);
           }
 
@@ -256,9 +369,10 @@ const durToSec = d => { if(!d||d==='N/A') return 0; const p=d.split(':').map(Num
 const progressBar = (cur, total, size=20) => {
   const p = total > 0 ? Math.min(cur / total, 1) : 0;
   const f = Math.round(size * p);
-  const filled = '━'.repeat(Math.max(0, f));
-  const empty  = '─'.repeat(Math.max(0, size - f));
-  return `\`${toTime(cur)}\` ${filled}●${empty} \`${toTime(total)}\``;
+  const pct = Math.round(p * 100);
+  const filled = '▬'.repeat(Math.max(0, f));
+  const empty  = '╌'.repeat(Math.max(0, size - f));
+  return `\`${toTime(cur)}\`\n${filled}◉${empty}\n\`${toTime(total)}\`  ·  \`${pct}%\``;
 };
 const volBar   = vol => { const f=Math.round(vol/10); return '█'.repeat(f)+'░'.repeat(10-f)+` **${vol}%**`; };
 const fmtDur   = sec => { if(sec<60) return `${sec}s`; if(sec<3600) return `${Math.floor(sec/60)}m ${sec%60}s`; return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`; };
@@ -295,7 +409,14 @@ async function updateChannelStatus(title, q=null) {
     if (title) {
       const pos   = q ? 1 : 1;
       const total = q ? q.songs.length : 1;
-      status = `**${pos}/${total} │ ${shortTitle(title, 30).replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim()}**`;
+      const cleanTitle = title
+        .replace(/#\S+/g, '')
+        .replace(/\[(?!.*(?:feat|ft|ver|version|mix|edit))[^\]]*\]/gi, '')
+        .replace(/\((?!.*(?:feat|ft|ver|version|mix|edit|cover))[^)]*\)/gi, '')
+        .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+      status = `**${pos}/${total} │ ${shortTitle(cleanTitle, 35)}**`;
     }
     await client.rest.put(`/channels/${VOICE_CHANNEL_ID}/voice-status`, { body: { status } });
   } catch {}
@@ -351,7 +472,7 @@ function queueEmbed(q, page=1) {
   const totalPages = Math.max(1, Math.ceil(allDisplay.length / QUEUE_PER_PAGE));
   page = Math.min(Math.max(1, page), totalPages);
 
-  const npRemaining = q.startTime ? Math.max(0, durToSec(np.duration) - Math.floor((Date.now()-q.startTime)/1000)) : durToSec(np.duration);
+  const npRemaining = q.startTime ? Math.max(0, durToSec(np.duration) - getElapsed(q)) : durToSec(np.duration);
   let accum = npRemaining;
   const etaMap = [];
   for (const s of allDisplay) { etaMap.push(accum); accum += durToSec(s.duration); }
@@ -453,6 +574,9 @@ function settingsEmbed(guildId) {
   const s = getSettings(guildId);
   const on  = '🟢 On';
   const off = '🔴 Off';
+  const genreLabel = s.genreOnly && s.genreOnly !== 'off'
+    ? (GENRE_OPTIONS.find(g => g.value === s.genreOnly)?.label || s.genreOnly)
+    : '🎵 Off (semua genre)';
   return new EmbedBuilder()
     .setColor(C.info)
     .setAuthor({ name: '⚙️  Bot Settings', iconURL: BOT_ICON() })
@@ -465,6 +589,7 @@ function settingsEmbed(guildId) {
       { name: '🔁  Default Loop',     value: `\`${s.loop}\``,          inline: true },
       { name: '🔊  Default Volume',   value: `\`${s.defaultVol}%\``,   inline: true },
       { name: '📋  Max Playlist',     value: `\`${s.maxPlaylist} songs\``, inline: true },
+      { name: '🎼  Genre Only',       value: genreLabel,               inline: true },
     )
     .setFooter({ text: 'Tofuu Music  ·  Pengaturan tersimpan otomatis', iconURL: BOT_ICON() })
     .setTimestamp();
@@ -474,41 +599,53 @@ function settingsButtons(guildId) {
   const s = getSettings(guildId);
   const loopModes = ['off', 'song', 'queue'];
   const nextLoop  = loopModes[(loopModes.indexOf(s.loop) + 1) % loopModes.length];
+  // Row 1: Genre select menu
+  const currentGenre = s.genreOnly || 'off';
   const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('set_genre')
+      .setPlaceholder('🎼  Genre Only — pilih filter autoplay...')
+      .addOptions(GENRE_OPTIONS.map(g => ({
+        label:       g.label,
+        value:       g.value,
+        description: g.description,
+        default:     g.value === currentGenre,
+      })))
+  );
+  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('set_247')    .setLabel('24/7')         .setEmoji('🌙').setStyle(s.mode247      ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_dj')     .setLabel('DJ Mode')      .setEmoji('🎧').setStyle(s.djMode       ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_ap')     .setLabel('Autoplay')     .setEmoji('🔄').setStyle(s.autoplay     ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_ann')    .setLabel('Announce')     .setEmoji('📢').setStyle(s.announceNext ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_loop')   .setLabel(`Loop: ${nextLoop}`).setEmoji('🔁').setStyle(ButtonStyle.Secondary),
   );
-  const row2 = new ActionRowBuilder().addComponents(
+  const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('set_vol_down') .setLabel('Vol -10')      .setEmoji('🔉').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_vol_up')   .setLabel('Vol +10')      .setEmoji('🔊').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_pl_modal') .setLabel('Max Playlist') .setEmoji('📋').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('set_reset')    .setLabel('Reset Default').setEmoji('🔃').setStyle(ButtonStyle.Danger),
   );
-  const row3 = new ActionRowBuilder().addComponents(
+  const row4 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('set_close').setLabel('X').setStyle(ButtonStyle.Danger),
   );
-  return [row1, row2, row3];
+  return [row1, row2, row3, row4];
 }
 
 // prefetchAutoplay masih ada tapi hanya untuk kebutuhan internal DJ mode / autoplay normal
-async function prefetchAutoplay(q, songUrl) {
+async function prefetchAutoplay(q, songUrl, guildId) {
   if (!q.autoplay || !songUrl) return;
   try {
     const usedIds = new Set([
       ...q.history,
       ...(q.upcomingAutoplay||[]).map(s=>s.url.split('v=')[1]?.split('&')[0]).filter(Boolean)
     ]);
-    // Kumpulkan genre hints dari lagu-lagu terakhir di history (judul + artist)
     const recentTitles = (q.genreHistory||[]).join(' ');
     const genreHints = detectGenreKeywords(recentTitles);
 
     let lastUrl = songUrl;
     const suggestions = [];
     for (let i=0; i<3; i++) {
-      const rel = await getRelatedSong(lastUrl, [...usedIds], q.artistHistory||[], genreHints);
+      const rel = await getRelatedSong(lastUrl, [...usedIds], q.artistHistory||[], genreHints, guildId);
       if (!rel) break;
       const id = rel.url.split('v=')[1]?.split('&')[0];
       if (id) usedIds.add(id);
@@ -559,7 +696,7 @@ function startProgressUpdater(q, msg, song) {
     try {
       await msg.edit({embeds:[npEmbed(song,q,getElapsed(q))],components:makeButtons(q.paused,q.loop,q.autoplay)});
     } catch { clearInterval(q.progressInterval); }
-  }, 10000);
+  }, 5000);
 }
 
 // ─── PLAY ─────────────────────────────────────────────────────────────────────
@@ -586,14 +723,17 @@ async function play(guild, textChannel) {
       resource = createAudioResource(proc.stdout, { inputType:'arbitrary', inlineVolume:true });
     }
     resource.volume?.setVolume(((q.volume||100)/100)*2);
-    q.resource=resource; q.player.play(resource);
+    q.resource=resource;
+    q.player.removeAllListeners(AudioPlayerStatus.Idle);
+    q.player.removeAllListeners(AudioPlayerStatus.Playing);
+    q.player.removeAllListeners('error');
+    q.player.once(AudioPlayerStatus.Playing, ()=>{ q.startTime=Date.now(); q.pausedElapsed=0; });
+    q.player.play(resource);
     updateStatus(song.title); updateChannelStatus(song.title, q);
     const msg = await textChannel.send({embeds:[npEmbed(song,q,0)],components:makeButtons(false,q.loop,q.autoplay)});
     q.npMessage=msg;
     startProgressUpdater(q,msg,song);
-    if (q.autoplay) prefetchAutoplay(q, song.url);
-    q.player.removeAllListeners(AudioPlayerStatus.Idle);
-    q.player.removeAllListeners('error');
+    if (q.autoplay) prefetchAutoplay(q, song.url, guild.id);
     q.player.once(AudioPlayerStatus.Idle, async()=>{
       const lastUrl=q.songs[0]?.url||''; const lastId=lastUrl.split('v=')[1]?.split('&')[0];
       if (q.currentProcess) { q.currentProcess.kill('SIGTERM'); q.currentProcess=null; }
@@ -615,7 +755,7 @@ async function play(guild, textChannel) {
         if (q.upcomingAutoplay?.length) {
           q.songs.push(q.upcomingAutoplay.shift());
         } else if (lastUrl) {
-          const rel = await getRelatedSong(lastUrl, q.history, q.artistHistory||[], genreHints);
+          const rel = await getRelatedSong(lastUrl, q.history, q.artistHistory||[], genreHints, guild.id);
           if (rel) q.songs.push(rel);
         }
       }
@@ -626,7 +766,7 @@ async function play(guild, textChannel) {
           q.songs.push(next);
           textChannel.send({embeds:[notif(`🔄  **Autoplay →** [${next.title}](${next.url})  \`${next.duration}\``,C.muted)]});
         } else {
-          const rel = await getRelatedSong(lastUrl, q.history, q.artistHistory||[], genreHints);
+          const rel = await getRelatedSong(lastUrl, q.history, q.artistHistory||[], genreHints, guild.id);
           if (rel) {
             q.songs.push(rel);
             textChannel.send({embeds:[notif(`🔄  **Autoplay →** [${rel.title}](${rel.url})  \`${rel.duration}\``,C.muted)]});
@@ -746,6 +886,7 @@ async function handleCommand(command, args, guild, channel, member, reply) {
 
   else if (command==='skip') {
     if(!q) return reply('❌  Tidak ada lagu yang diputar.');
+    q.prevSong = q.songs[0]||null;
     const s=q.songs[0]?.title||'Unknown'; q.player.stop();
     channel.send({embeds:[notif(`⏭  Melewati **${s}**`,C.info,'Skipped')]});
   }
@@ -842,7 +983,8 @@ async function handleCommand(command, args, guild, channel, member, reply) {
   else if (command==='bass') {
     if(!q) return reply('❌  Tidak ada lagu yang diputar.');
     const level=parseInt(args[0]); if(isNaN(level)||level<0||level>10) return reply('❌  Level 0–10!');
-    q.resource?.volume?.setVolume(1+level*0.3);
+    const baseVol = (q.volume||100)/100;
+    q.resource?.volume?.setVolume(baseVol*(1+level*0.3));
     channel.send({embeds:[notif(`🎸  \`${'█'.repeat(level)}${'░'.repeat(10-level)}\`  Bass Level **${level}**`,C.info,'Bassboost')]});
   }
   else if (command==='autoplay') {
@@ -951,6 +1093,15 @@ async function handleCommand(command, args, guild, channel, member, reply) {
     channel.send({ embeds: [settingsEmbed(guild.id)], components: settingsButtons(guild.id) });
   }
 
+  else if (command==='setgenre') {
+    const genre = args[0] || 'off';
+    const s = getSettings(guild.id);
+    s.genreOnly = genre;
+    saveSettings(guild.id);
+    const label = GENRE_OPTIONS.find(g => g.value === genre)?.label || genre;
+    channel.send({ embeds: [notif(`🎼  Genre filter diset ke **${label}**`, C.success, 'Genre Filter')] });
+  }
+
   else if (command==='help') {
     channel.send({embeds:[helpEmbed()]});
   }
@@ -976,7 +1127,17 @@ client.on('interactionCreate', async interaction=>{
     return;
   }
 
-  if (!interaction.isButton()&&!interaction.isChatInputCommand()&&!interaction.isModalSubmit()) return;
+  if (!interaction.isButton()&&!interaction.isChatInputCommand()&&!interaction.isModalSubmit()&&!interaction.isStringSelectMenu()) return;
+
+  // ── Select Menu: genre filter ─────────────────────────────────────────────
+  if (interaction.isStringSelectMenu() && interaction.customId === 'set_genre') {
+    try { await interaction.deferUpdate(); } catch { return; }
+    const s = getSettings(interaction.guild.id);
+    s.genreOnly = interaction.values[0] || 'off';
+    saveSettings(interaction.guild.id);
+    await interaction.message.edit({ embeds: [settingsEmbed(interaction.guild.id)], components: settingsButtons(interaction.guild.id) });
+    return;
+  }
 
   if (interaction.isButton() && interaction.customId.startsWith('set_')) {
     const guildId = interaction.guild.id;
@@ -1012,7 +1173,7 @@ client.on('interactionCreate', async interaction=>{
     else if (id === 'set_ann')      { s.announceNext = !s.announceNext; }
     else if (id === 'set_loop')     { const m=['off','song','queue']; s.loop = m[(m.indexOf(s.loop)+1)%m.length]; if(q) q.loop = s.loop; }
     else if (id === 'set_vol_down') { s.defaultVol = Math.max(0,   s.defaultVol - 10); if(q) { q.volume=s.defaultVol; q.resource?.volume?.setVolume((s.defaultVol/100)*2); } }
-    else if (id === 'set_vol_up')   { s.defaultVol = Math.min(200, s.defaultVol + 10); if(q) { q.volume=s.defaultVol; q.resource?.volume?.setVolume((s.defaultVol/100)*2); } }
+    else if (id === 'set_vol_up')   { s.defaultVol = Math.min(100, s.defaultVol + 10); if(q) { q.volume=s.defaultVol; q.resource?.volume?.setVolume((s.defaultVol/100)*2); } }
     else if (id === 'set_reset')    { guildSettings.set(guildId, { ...DEFAULT_SETTINGS }); }
 
     saveSettings(guildId);
@@ -1086,7 +1247,7 @@ client.on('interactionCreate', async interaction=>{
   }
 
   if (!interaction.isChatInputCommand()) return;
-  await interaction.deferReply({ flags: 64 });
+  try { await interaction.deferReply({ flags: 64 }); } catch { return; }
   const cmd=interaction.commandName;
   let args=[];
   if (cmd==='play')   args=[interaction.options.getString('lagu')];
@@ -1099,6 +1260,7 @@ client.on('interactionCreate', async interaction=>{
   if (cmd==='savepl') args=[interaction.options.getString('nama')];
   if (cmd==='loadpl') args=[interaction.options.getString('nama')];
   if (cmd==='delpl')  args=[interaction.options.getString('nama')];
+  if (cmd==='setgenre') args=[interaction.options.getString('genre')];
   await handleCommand(cmd,args,interaction.guild,interaction.channel,interaction.member,t=>interaction.editReply(t));
 });
 
@@ -1108,6 +1270,7 @@ client.on('messageCreate', async message=>{
   const content=message.content.trim();
   if (!content.startsWith('m')) return;
   const map=[
+    ['mp ','play',3],['mskip','skip',5],['mstop','stop',5],
     ['mpause','pause',6],['mresume','resume',7],['mq','queue',2],['mnp','np',3],
     ['mremove ','remove',8],['mmove ','move',6],['mloop','loop',5],['mvol','volume',4],['mshuffle','shuffle',8],
     ['mvskip','voteskip',6],['msave','save',5],['mload','load',5],['mlyrics','lyrics',7],
