@@ -1,6 +1,5 @@
 const path = require('path');
 const { spawn } = require('child_process');
-const youtubedl = require('youtube-dl-exec');
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActivityType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const playdl = require('play-dl');
@@ -254,122 +253,69 @@ function detectGenreKeywords(text) {
 // ─── GENRE FILTER ─────────────────────────────────────────────────────────────
 
 async function searchGenreDirect(query, histSet=new Set()) {
-  return new Promise(resolve => {
-    try {
-      youtubedl(`ytsearch15:${query}`, {
-        dumpJson: true, flatPlaylist: true, noWarnings: true, quiet: true,
-        cookies: path.join(__dirname,'cookies.txt'),
-        playlistEnd: 15, printJson: true,
-      }).then(output => {
-        const raw = typeof output === 'string' ? output : JSON.stringify(output);
-        try {
-          const lines = raw.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
-          const candidates = lines
-            .map(l=>{try{return JSON.parse(l);}catch{return null;}})
-            .filter(v=>{
-              if (!v || histSet.has(v.id)) return false;
-              const dur = v.duration || 0;
-              return dur > 0 && dur <= 600;
-            });
-          if (!candidates.length) return resolve(null);
-          const pick = candidates[Math.floor(Math.random()*Math.min(candidates.length,5))];
-          const uploader = (pick.uploader||pick.channel||'').replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim();
-          resolve({
-            title:    pick.title||'Unknown',
-            url:      `https://www.youtube.com/watch?v=${pick.id}`,
-            duration: pick.duration_string||'N/A',
-            requester:'Autoplay',
-            source:   'youtube',
-            artist:   uploader,
-          });
-        } catch { resolve(null); }
-      }).catch(()=>resolve(null));
-    } catch { resolve(null); }
-  });
+  try {
+    const results = await playdl.search(query, { source:{ youtube:'video' }, limit:15 });
+    const candidates = results.filter(v => {
+      const id = v.url?.split('v=')[1]?.split('&')[0];
+      return id && !histSet.has(id) && v.durationInSec > 0 && v.durationInSec <= 600;
+    });
+    if (!candidates.length) return null;
+    const pick = candidates[Math.floor(Math.random()*Math.min(candidates.length,5))];
+    return {
+      title:    pick.title||'Unknown', url: pick.url,
+      duration: pick.durationRaw||'N/A', requester:'Autoplay', source:'youtube',
+      artist:   pick.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'',
+    };
+  } catch { return null; }
 }
 
 async function getRelatedSong(lastUrl, history=[], artistHistory=[], genreHints=[], guildId=null) {
-  return new Promise(resolve=>{
-    try {
-      const videoId = lastUrl.split('v=')[1]?.split('&')[0]; if (!videoId) return resolve(null);
-      youtubedl(`https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`, {
-        dumpJson: true, flatPlaylist: true, noWarnings: true, quiet: true,
-        cookies: path.join(__dirname,'cookies.txt'),
-        playlistEnd: 30, printJson: true,
-      }).then(output => {
-        const raw = typeof output === 'string' ? output : JSON.stringify(output);
-        try {
-          const lines = raw.trim().split('\n').filter(l=>{try{JSON.parse(l);return true;}catch{return false;}});
-          const histSet = new Set(history);
-          let candidates = lines.slice(1)
-            .map(l=>{ try { return JSON.parse(l); } catch { return null; } })
-            .filter(v => {
-              if (!v || histSet.has(v.id)) return false;
-              // Block lagu > 10 menit di autoplay
-              const dur = v.duration || 0;
-              return dur > 0 && dur <= 600;
-            });
+  try {
+    const histSet = new Set(history);
+    const genreOnly = guildId ? getSettings(guildId).genreOnly : null;
 
-          if (!candidates.length) return resolve(null);
+    // Tentukan query
+    let searchQuery;
+    if (genreOnly && genreOnly !== 'off' && GENRE_KEYWORD_MAP[genreOnly]) {
+      searchQuery = GENRE_KEYWORD_MAP[genreOnly].slice(0,3).join(' ') + ' music';
+    } else if (genreHints.length) {
+      searchQuery = genreHints.slice(-3).join(' ') + ' music';
+    } else {
+      // Ambil info lagu sekarang untuk search related
+      const info = await playdl.search(lastUrl, { source:{ youtube:'video' }, limit:1 });
+      const title  = info[0]?.title || '';
+      const artist = info[0]?.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim() || '';
+      const base   = title.split(' - ')[0].split('(')[0].trim();
+      searchQuery  = `${artist} ${base} similar music`.trim();
+    }
 
-          // Hard filter: kalau genreOnly aktif, hanya lagu yang cocok keyword genre itu
-          const genreOnly = guildId ? getSettings(guildId).genreOnly : null;
-          if (genreOnly && genreOnly !== 'off' && GENRE_KEYWORD_MAP[genreOnly]) {
-            const hardKeywords = GENRE_KEYWORD_MAP[genreOnly];
-            const filtered = candidates.filter(v => {
-              const combined = ((v.title||'') + ' ' + (v.uploader||v.channel||'')).toLowerCase();
-              return hardKeywords.some(k => combined.includes(k));
-            });
-            if (filtered.length) {
-              candidates = filtered;
-            } else {
-              const searchQuery = hardKeywords.slice(0,3).join(' ') + ' music';
-              return searchGenreDirect(searchQuery, histSet).then(resolve);
-            }
-          }
+    const results = await playdl.search(searchQuery, { source:{ youtube:'video' }, limit:20 });
+    let candidates = results.filter(v => {
+      const id = v.url?.split('v=')[1]?.split('&')[0];
+      return id && !histSet.has(id) && v.durationInSec > 0 && v.durationInSec <= 600;
+    });
+    if (!candidates.length) return null;
 
-          // Score tiap kandidat dengan recency weight:
-          // keyword dari lagu yang lebih baru di genreHistory dapat bobot lebih tinggi
-          const scored = candidates.map(v => {
-            const titleLower = (v.title||'').toLowerCase();
-            const channelLower = (v.uploader||v.channel||'').toLowerCase();
-            const combined = titleLower + ' ' + channelLower;
-            let score = 0;
-            const total = genreHints.length || 1;
-            genreHints.forEach((k, i) => {
-              if (combined.includes(k)) {
-                score += 1 + (i / total);
-              }
-            });
-            return { v, score };
-          });
+    // Score berdasarkan genreHints
+    const scored = candidates.map(v => {
+      const combined = ((v.title||'') + ' ' + (v.channel?.name||'')).toLowerCase();
+      let score = 0;
+      const total = genreHints.length || 1;
+      genreHints.forEach((k,i) => { if (combined.includes(k)) score += 1 + (i/total); });
+      return { v, score };
+    });
+    scored.sort((a,b) => b.score - a.score);
+    const pool = (scored[0].score > 0
+      ? scored.filter(x=>x.score===scored[0].score)
+      : scored).map(x=>x.v).sort(()=>Math.random()-0.5);
 
-          // Prioritas: genre match dulu, fallback ke random kalau tidak ada
-          scored.sort((a, b) => b.score - a.score);
-          const topScore = scored[0].score;
-
-          let pool;
-          if (topScore > 0) {
-            pool = scored.filter(x => x.score === topScore).map(x => x.v);
-          } else {
-            pool = scored.map(x => x.v);
-          }
-
-          pool = pool.sort(() => Math.random() - 0.5);
-          const pick = pool[0];
-          const uploader = (pick.uploader||pick.channel||'').replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim();
-          resolve({
-            title:    pick.title||'Unknown',
-            url:      `https://www.youtube.com/watch?v=${pick.id}`,
-            duration: pick.duration_string||'N/A',
-            requester:'Autoplay',
-            source:   'youtube',
-            artist:   uploader,
-          });
-        } catch { resolve(null); }
-      }).catch(()=>resolve(null));
-    } catch { resolve(null); }
-  });
+    const pick = pool[0];
+    return {
+      title:    pick.title||'Unknown', url: pick.url,
+      duration: pick.durationRaw||'N/A', requester:'Autoplay', source:'youtube',
+      artist:   pick.channel?.name?.replace(/\s*(VEVO|Official|Music|Topic)$/i,'').trim()||'',
+    };
+  } catch(e) { console.error('getRelatedSong:', e.message); return null; }
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -727,16 +673,9 @@ async function play(guild, textChannel) {
       const scStream = await playdl.stream(song.url, { quality:2 });
       resource = createAudioResource(scStream.stream, { inputType:scStream.type, inlineVolume:true });
     } else {
-      // YouTube via youtube-dl-exec (cross-platform, no python needed)
-      const proc = youtubedl.exec(song.url, {
-        format: 'bestaudio/best',
-        output: '-',
-        quiet: true,
-        cookies: path.join(__dirname, 'cookies.txt'),
-      });
-      proc.stderr?.on('data', d=>{ const m=d.toString(); if(!m.includes('Broken pipe')&&!m.includes('Invalid argument')) console.error('yt-dlp:',m.trim()); });
-      q.currentProcess = proc;
-      resource = createAudioResource(proc.stdout, { inputType:'arbitrary', inlineVolume:true });
+      // YouTube via play-dl (pure Node.js, no python/yt-dlp needed)
+      const ytStream = await playdl.stream(song.url, { quality: 2 });
+      resource = createAudioResource(ytStream.stream, { inputType: ytStream.type, inlineVolume: true });
     }
     resource.volume?.setVolume(((q.volume||100)/100)*2);
     q.resource=resource;
@@ -752,7 +691,7 @@ async function play(guild, textChannel) {
     if (q.autoplay) prefetchAutoplay(q, song.url, guild.id);
     q.player.once(AudioPlayerStatus.Idle, async()=>{
       const lastUrl=q.songs[0]?.url||''; const lastId=lastUrl.split('v=')[1]?.split('&')[0];
-      if (q.currentProcess) { q.currentProcess.kill('SIGTERM'); q.currentProcess=null; }
+      if (q.currentProcess) { try { q.currentProcess.kill('SIGTERM'); } catch {} q.currentProcess=null; }
       if (q.progressInterval) { clearInterval(q.progressInterval); q.progressInterval=null; }
       if (lastId) { q.history.push(lastId); if(q.history.length>300) q.history.shift(); }
       const lastArtist = q.songs[0]?.artist;
