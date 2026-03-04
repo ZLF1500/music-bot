@@ -758,7 +758,12 @@ async function play(guild, textChannel) {
       play(guild,textChannel);
     });
     q.player.on('error',err=>{ console.error('Player:',err.message); if(q.currentProcess){q.currentProcess.kill('SIGTERM');q.currentProcess=null;} if(q.progressInterval){clearInterval(q.progressInterval);q.progressInterval=null;} q.songs.shift(); play(guild,textChannel); });
-  } catch(err) { console.error(err); q.songs.shift(); play(guild,textChannel); }
+  } catch(err) {
+    console.error('play() error:', err?.message || err);
+    textChannel?.send({ embeds:[notif(`❌  Gagal memutar: **${song?.title||'Unknown'}**\n\`${err?.message||'Unknown error'}\``, C.danger)] }).catch(()=>{});
+    q.songs.shift();
+    if (q.songs.length) play(guild, textChannel);
+  }
 }
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────
